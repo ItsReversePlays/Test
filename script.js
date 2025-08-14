@@ -56,6 +56,9 @@ class Node {
             nodeTemplate.pins.forEach(pinTemplate => { this.pins.push(new Pin(this, pinTemplate)); });
         }
     }
+    addPin(pin) {
+        this.pins.push(pin);
+    }
     getPin(name) { return this.pins.find(p => p.name === name); }
 }
 
