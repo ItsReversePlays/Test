@@ -194,8 +194,16 @@ document.addEventListener('DOMContentLoaded', (event) => {
     }
 
     function generateBlueprintText(graph) {
+        const logicNodes = graph.nodes.filter(node =>
+            node.type !== 'K2Node_FunctionEntry' && node.type !== 'K2Node_FunctionResult'
+        );
+
+        if (logicNodes.length === 0) {
+            return "No paste-able nodes were generated. The function logic may be empty or only contain return statements.";
+        }
+
         let clipboardText = 'Begin Object Class=/Script/BlueprintGraph.EdGraph Name="EdGraph_1"\n';
-        graph.nodes.forEach(node => {
+        logicNodes.forEach(node => {
             const nodeName = `${node.type}_${node.id.substring(0, 8)}`;
             clipboardText += `   Begin Object Class=/Script/BlueprintGraph.${node.type} Name="${nodeName}"\n`;
             clipboardText += `      NodePosX=${node.posX}\n`;
@@ -204,18 +212,24 @@ document.addEventListener('DOMContentLoaded', (event) => {
             node.pins.forEach(pin => {
                 let pinString = `      CustomProperties Pin (PinId=${pin.id},PinName="${pin.name}",`;
                 if (pin.direction === 'Output') pinString += `Direction="EGPD_Output",`;
-                let linkedTo = '';
-                if(pin.linkedTo.length > 0) {
-                    linkedTo += `LinkedTo=(`;
-                    pin.linkedTo.forEach((link, index) => {
-                        const ownerNode = link.ownerNode;
-                        const ownerNodeName = `${ownerNode.type}_${ownerNode.id.substring(0, 8)}`;
+
+                const validLinks = pin.linkedTo.filter(link =>
+                    link.ownerNode.type !== 'K2Node_FunctionEntry' &&
+                    link.ownerNode.type !== 'K2Node_FunctionResult'
+                );
+
+                if(validLinks.length > 0) {
+                    let linkedTo = `LinkedTo=(`;
+                    validLinks.forEach((link, index) => {
+                        const ownerNodeName = `${link.ownerNode.type}_${link.ownerNode.id.substring(0, 8)}`;
                         linkedTo += `${ownerNodeName} ${link.id}`;
-                        if(index < pin.linkedTo.length - 1) linkedTo += ',';
+                        if(index < validLinks.length - 1) linkedTo += ',';
                     });
                     linkedTo += `),`;
+                    pinString += linkedTo;
                 }
-                pinString += `${linkedTo}PinType.PinCategory="${pin.type}",PersistentGuid=00000000000000000000000000000000,bHidden=False,bNotConnectable=False,bDefaultValueIsReadOnly=False,bDefaultValueIsIgnored=False,bAdvancedView=False,bOrphanedPin=False,)\n`;
+
+                pinString += `PinType.PinCategory="${pin.type}",PersistentGuid=00000000000000000000000000000000,bHidden=False,bNotConnectable=False,bDefaultValueIsReadOnly=False,bDefaultValueIsIgnored=False,bAdvancedView=False,bOrphanedPin=False,)\n`;
                 clipboardText += pinString;
             });
             clipboardText += '   End Object\n';
