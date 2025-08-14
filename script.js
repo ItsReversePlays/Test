@@ -6,6 +6,7 @@ class Pin {
         this.type = type; // e.g., "exec", "bool", "int"
         this.linkedTo = []; // Can link to multiple input pins
         this.ownerNode = ownerNode;
+        this.defaultValue = null;
     }
 }
 
@@ -45,8 +46,22 @@ const layoutManager = {
             this.y += this.nodeHeight;
         }
         return position;
+    },
+    getExpressionNodePosition: function() {
+        // Position expression nodes to the left of the main flow
+        const pos = this.getNextPosition();
+        return { x: pos.x - 1000, y: pos.y };
     }
 };
+
+const operatorMap = {
+    '>': { name: 'Greater_IntInt', type: 'K2Node_CallFunction', pinType: 'bool' },
+    '<': { name: 'Less_IntInt', type: 'K2Node_CallFunction', pinType: 'bool' },
+    '==': { name: 'EqualEqual_IntInt', type: 'K2Node_CallFunction', pinType: 'bool' },
+    '+': { name: 'Add_IntInt', type: 'K2Node_CallFunction', pinType: 'int' },
+    '-': { name: 'Subtract_IntInt', type: 'K2Node_CallFunction', pinType: 'int' }
+};
+
 
 document.addEventListener('DOMContentLoaded', (event) => {
     const convertBtn = document.getElementById('convert-btn');
@@ -91,6 +106,27 @@ document.addEventListener('DOMContentLoaded', (event) => {
             }
         }
         return -1;
+    }
+
+    function parseExpression(expression) {
+        expression = expression.trim();
+        const binaryRegex = /^\s*(\w+)\s*([>|<|==|!=|+|-|*|/])\s*(\w+)\s*$/;
+        const binaryMatch = expression.match(binaryRegex);
+        if (binaryMatch) {
+            return {
+                type: 'BinaryExpression',
+                operator: binaryMatch[2],
+                left: parseExpression(binaryMatch[1]),
+                right: parseExpression(binaryMatch[3])
+            };
+        }
+        if (!isNaN(expression) && !isNaN(parseFloat(expression))) {
+            return { type: 'Literal', value: expression, dataType: 'int' };
+        }
+        if (expression === 'true' || expression === 'false') {
+            return { type: 'Literal', value: expression, dataType: 'bool' };
+        }
+        return { type: 'Identifier', name: expression };
     }
 
     function parseCpp(code) {
@@ -140,11 +176,57 @@ document.addEventListener('DOMContentLoaded', (event) => {
         return statements;
     }
 
+    function generateExpressionNodes(expressionAst, graph) {
+        if (expressionAst.type === 'Identifier') {
+            if (graph.localVariables.has(expressionAst.name)) {
+                return graph.localVariables.get(expressionAst.name);
+            }
+            throw new Error(`Undefined variable: ${expressionAst.name}`);
+        }
+        if (expressionAst.type === 'Literal') {
+            const literalPin = new Pin(generateGuid(), 'Literal', 'Output', expressionAst.dataType, null);
+            literalPin.defaultValue = expressionAst.value;
+            return literalPin;
+        }
+        if (expressionAst.type === 'BinaryExpression') {
+            const operatorInfo = operatorMap[expressionAst.operator];
+            if (!operatorInfo) throw new Error(`Unsupported operator: ${expressionAst.operator}`);
+
+            const opNode = new Node(generateGuid(), operatorInfo.name, operatorInfo.type);
+            const opPos = layoutManager.getExpressionNodePosition();
+            opNode.posX = opPos.x; opNode.posY = opPos.y;
+
+            const leftPin = generateExpressionNodes(expressionAst.left, graph);
+            const rightPin = generateExpressionNodes(expressionAst.right, graph);
+
+            const inputA = new Pin(generateGuid(), 'a', 'Input', leftPin.type, opNode);
+            const inputB = new Pin(generateGuid(), 'b', 'Input', rightPin.type, opNode);
+
+            if (leftPin.ownerNode) {
+                leftPin.linkedTo.push(inputA);
+            } else {
+                inputA.defaultValue = leftPin.defaultValue;
+            }
+
+            if (rightPin.ownerNode) {
+                rightPin.linkedTo.push(inputB);
+            } else {
+                inputB.defaultValue = rightPin.defaultValue;
+            }
+
+            const returnPin = new Pin(generateGuid(), 'ReturnValue', 'Output', operatorInfo.pinType, opNode);
+            opNode.pins.push(inputA, inputB, returnPin);
+            graph.nodes.push(opNode);
+            return returnPin;
+        }
+        return null;
+    }
+
     function convertToBlueprint(ast) {
         layoutManager.reset();
         const graph = { nodes: [], localVariables: new Map() };
         const entryNode = new Node(generateGuid(), ast.name, 'K2Node_FunctionEntry');
-        const entryPos = layoutManager.getNextPosition();
+        const entryPos = {x: -200, y: 0};
         entryNode.posX = entryPos.x; entryNode.posY = entryPos.y;
         const entryExecOut = new Pin(generateGuid(), 'then', 'Output', 'exec', entryNode);
         entryNode.addPin(entryExecOut);
@@ -164,6 +246,8 @@ document.addEventListener('DOMContentLoaded', (event) => {
             returnNode.addPin(new Pin(generateGuid(), `ReturnValue`, 'Input', ast.returnType, returnNode));
             graph.nodes.push(returnNode);
         }
+
+        layoutManager.reset();
         convertBlockToBlueprint(ast.body, graph, entryExecOut, returnNode);
         return graph;
     }
@@ -182,11 +266,27 @@ document.addEventListener('DOMContentLoaded', (event) => {
                 ifNode.pins.push(execIn, conditionIn, thenOut, elseOut);
                 if(lastExecPin) lastExecPin.linkedTo.push(execIn);
                 graph.nodes.push(ifNode);
+
+                const conditionAst = parseExpression(statement.condition);
+                const conditionOutputPin = generateExpressionNodes(conditionAst, graph);
+                if (conditionOutputPin) {
+                    conditionOutputPin.linkedTo.push(conditionIn);
+                }
+
                 const thenLastPin = convertBlockToBlueprint(statement.body, graph, thenOut, returnNode);
+
                 lastExecPin = elseOut;
             } else if (statement.type === 'ReturnStatement' && returnNode) {
                 const returnExecIn = returnNode.pins.find(p => p.type === 'exec');
                 if(lastExecPin) lastExecPin.linkedTo.push(returnExecIn);
+
+                const returnValuePin = returnNode.pins.find(p => p.name === 'ReturnValue');
+                const returnValueAst = parseExpression(statement.value);
+                const returnValueOutputPin = generateExpressionNodes(returnValueAst, graph);
+                if (returnValueOutputPin) {
+                    returnValueOutputPin.linkedTo.push(returnValuePin);
+                }
+
                 lastExecPin = null;
             }
         }
@@ -214,7 +314,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
                 if (pin.direction === 'Output') pinString += `Direction="EGPD_Output",`;
 
                 const validLinks = pin.linkedTo.filter(link =>
-                    link.ownerNode.type !== 'K2Node_FunctionEntry' &&
+                    link.ownerNode && link.ownerNode.type !== 'K2Node_FunctionEntry' &&
                     link.ownerNode.type !== 'K2Node_FunctionResult'
                 );
 
@@ -222,11 +322,15 @@ document.addEventListener('DOMContentLoaded', (event) => {
                     let linkedTo = `LinkedTo=(`;
                     validLinks.forEach((link, index) => {
                         const ownerNodeName = `${link.ownerNode.type}_${link.ownerNode.id.substring(0, 8)}`;
-                        linkedTo += `${ownerNodeName} ${link.id}`;
+                        linkedTo += `${ownerNodeName}'${link.id}'`;
                         if(index < validLinks.length - 1) linkedTo += ',';
                     });
                     linkedTo += `),`;
                     pinString += linkedTo;
+                }
+
+                if (pin.defaultValue) {
+                    pinString += `DefaultValue="${pin.defaultValue}",`
                 }
 
                 pinString += `PinType.PinCategory="${pin.type}",PersistentGuid=00000000000000000000000000000000,bHidden=False,bNotConnectable=False,bDefaultValueIsReadOnly=False,bDefaultValueIsIgnored=False,bAdvancedView=False,bOrphanedPin=False,)\n`;
