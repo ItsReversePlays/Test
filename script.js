@@ -61,6 +61,9 @@ document.addEventListener('DOMContentLoaded', (event) => {
             const ifMatch = line.match(ifRegex);
             if (ifMatch) {
                 const ifBlockEnd = lines.indexOf('}', i);
+                if (ifBlockEnd === -1) {
+                    throw new Error("Syntax error: Missing closing brace '}' for an if statement.");
+                }
                 const ifBlock = lines.slice(i + 1, ifBlockEnd).join('; ');
                 statements.push({
                     type: 'IfStatement',
