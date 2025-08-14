@@ -1,58 +1,25 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>2048</title>
+  <title>C++ to Blueprint Converter</title>
   <link rel="stylesheet" type="text/css" href="style.css">
 </head>
 <body>
   <div class="container">
     <div class="heading">
-      <h1 class="title">2048</h1>
-      <div class="scores-container">
-        <div class="score-container">0</div>
-        <div class="best-container">0</div>
-      </div>
+      <h1 class="title">C++ to Blueprint Converter</h1>
+      <p class="description">Enter your C++ code below to convert it to a Blueprint representation.</p>
     </div>
 
-    <div class="above-game">
-      <p class="game-intro">Join the numbers and get to the <strong>2048 tile!</strong></p>
-      <a class="restart-button">New Game</a>
-    </div>
-
-    <div class="game-container">
-      <div class="game-message">
-        <p></p>
-        <div class="lower">
-	        <a class="retry-button">Try again</a>
-        </div>
+    <div class="converter-container">
+      <div class="input-container">
+        <h2>C++ Code</h2>
+        <textarea id="cpp-code" placeholder="Enter C++ code here..."></textarea>
+        <button id="convert-btn">Convert</button>
       </div>
-      <div class="grid-container">
-        <div class="grid-row">
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-        </div>
-        <div class="grid-row">
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-        </div>
-        <div class="grid-row">
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-        </div>
-        <div class="grid-row">
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-          <div class="grid-cell"></div>
-        </div>
-      </div>
-      <div class="tile-container">
+      <div class="output-container">
+        <h2>Blueprint Output</h2>
+        <div id="blueprint-output"></div>
       </div>
     </div>
   </div>
