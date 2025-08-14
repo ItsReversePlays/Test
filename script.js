@@ -322,7 +322,7 @@ document.addEventListener('DOMContentLoaded', (event) => {
                     let linkedTo = `LinkedTo=(`;
                     validLinks.forEach((link, index) => {
                         const ownerNodeName = `${link.ownerNode.type}_${link.ownerNode.id.substring(0, 8)}`;
-                        linkedTo += `${ownerNodeName}'${link.id}'`;
+                        linkedTo += `${ownerNodeName} ${link.id}`;
                         if(index < validLinks.length - 1) linkedTo += ',';
                     });
                     linkedTo += `),`;
