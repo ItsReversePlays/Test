@@ -27,18 +27,40 @@ document.addEventListener('DOMContentLoaded', (event) => {
         }
     });
 
+    function findMatchingBrace(str, start) {
+        let depth = 1;
+        for (let i = start + 1; i < str.length; i++) {
+            if (str[i] === '{') {
+                depth++;
+            } else if (str[i] === '}') {
+                depth--;
+                if (depth === 0) {
+                    return i;
+                }
+            }
+        }
+        return -1; // Not found
+    }
+
     function parseCpp(code) {
-        const functionRegex = /(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{((?:[^{}]|{[^{}]*})*)\}/s;
+        const functionRegex = /^\s*(\w+)\s+(\w+)\s*\(([^)]*)\)\s*\{/;
         const match = code.match(functionRegex);
 
         if (!match) {
-            throw new Error('Could not parse the function. Please provide a function like "int MyFunction(...) { ... }"');
+            throw new Error('Could not parse the function signature. Expected format: "type name(...) {"');
+        }
+
+        const openingBraceIndex = match[0].length - 1;
+        const closingBraceIndex = findMatchingBrace(code, openingBraceIndex);
+
+        if (closingBraceIndex === -1) {
+            throw new Error('Could not find matching closing brace for function body.');
         }
 
         const returnType = match[1];
         const functionName = match[2];
         const params = match[3].split(',').map(p => p.trim()).filter(p => p);
-        const body = match[4].trim();
+        const body = code.substring(openingBraceIndex + 1, closingBraceIndex);
 
         return {
             type: 'FunctionDeclaration',
@@ -50,50 +72,73 @@ document.addEventListener('DOMContentLoaded', (event) => {
     }
 
     function parseBlock(blockCode) {
-        // This is a simplified parser. It will not handle all C++ syntax.
         const statements = [];
-        const lines = blockCode.split(/\\n|;/).map(l => l.trim()).filter(l => l);
+        let remainingCode = blockCode.trim();
 
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
+        while (remainingCode.length > 0) {
+            let matched = false;
 
-            const ifRegex = /if\s*\((.*)\)/;
-            const ifMatch = line.match(ifRegex);
+            // Try to match an if statement
+            const ifRegex = /^\s*if\s*\(([^)]*)\)\s*\{/;
+            const ifMatch = remainingCode.match(ifRegex);
             if (ifMatch) {
-                const ifBlockEnd = lines.indexOf('}', i);
-                if (ifBlockEnd === -1) {
-                    throw new Error("Syntax error: Missing closing brace '}' for an if statement.");
+                const openingBraceIndex = ifMatch[0].length - 1;
+                const closingBraceIndex = findMatchingBrace(remainingCode, openingBraceIndex);
+
+                if (closingBraceIndex === -1) {
+                    throw new Error("Syntax error: Mismatched braces in 'if' statement.");
                 }
-                const ifBlock = lines.slice(i + 1, ifBlockEnd).join('; ');
+
+                const condition = ifMatch[1].trim();
+                const body = remainingCode.substring(openingBraceIndex + 1, closingBraceIndex);
+
                 statements.push({
                     type: 'IfStatement',
-                    condition: ifMatch[1].trim(),
-                    body: parseBlock(ifBlock)
+                    condition: condition,
+                    body: parseBlock(body)
                 });
-                i = ifBlockEnd;
-                continue;
+
+                remainingCode = remainingCode.substring(closingBraceIndex + 1);
+                matched = true;
             }
 
-            const returnRegex = /return\s+(.*)/;
-            const returnMatch = line.match(returnRegex);
-            if (returnMatch) {
-                statements.push({
-                    type: 'ReturnStatement',
-                    value: returnMatch[1].trim()
-                });
-                continue;
+            // Try to match a return statement
+            if (!matched) {
+                const returnRegex = /^\s*return\s+([^;]+);/;
+                const returnMatch = remainingCode.match(returnRegex);
+                if (returnMatch) {
+                    statements.push({
+                        type: 'ReturnStatement',
+                        value: returnMatch[1].trim()
+                    });
+                    remainingCode = remainingCode.substring(returnMatch[0].length);
+                    matched = true;
+                }
             }
 
-            const declarationAssignmentRegex = /(\w+)\s+(\w+)\s*=\s*(.*)/;
-            const declarationMatch = line.match(declarationAssignmentRegex);
-            if (declarationMatch) {
-                statements.push({
-                    type: 'VariableDeclaration',
-                    dataType: declarationMatch[1],
-                    variableName: declarationMatch[2],
-                    value: declarationMatch[3]
-                });
-                continue;
+            // Try to match a variable declaration
+            if (!matched) {
+                const varRegex = /^\s*(\w+)\s+(\w+)\s*=\s*([^;]+);/;
+                const varMatch = remainingCode.match(varRegex);
+                if(varMatch) {
+                    statements.push({
+                        type: 'VariableDeclaration',
+                        dataType: varMatch[1],
+                        variableName: varMatch[2],
+                        value: varMatch[3].trim()
+                    });
+                    remainingCode = remainingCode.substring(varMatch[0].length);
+                    matched = true;
+                }
+            }
+
+            // If nothing matched, trim whitespace and continue, or throw error
+            if (!matched) {
+                const oldLength = remainingCode.length;
+                remainingCode = remainingCode.trim();
+                if (remainingCode.length === oldLength && oldLength > 0) {
+                    throw new Error(`Unrecognized syntax near: "${remainingCode.substring(0, 20)}..."`);
+                }
             }
         }
         return statements;
@@ -104,25 +149,25 @@ document.addEventListener('DOMContentLoaded', (event) => {
             return 'Unsupported C++ construct.';
         }
 
-        let output = `Blueprint for function: ${ast.name}\\n\\n`;
-        output += '--- NODES ---\\n';
+        let output = `Blueprint for function: ${ast.name}\n\n`;
+        output += '--- NODES ---\n';
 
-        output += '  - Node: Function Entry\\n';
-        output += `    Name: ${ast.name}\\n`;
-        output += '    ExecOut: ->\\n';
+        output += '  - Node: Function Entry\n';
+        output += `    Name: ${ast.name}\n`;
+        output += '    ExecOut: ->\n';
         ast.parameters.forEach(param => {
-            output += `    Parameter: ${param}\\n`;
+            output += `    Parameter: ${param}\n`;
         });
-        output += '\\n';
+        output += '\n';
 
         output += convertBlockToBlueprint(ast.body, "    ");
 
         if (ast.returnType !== 'void') {
-            output += '  - Node: Return Node\\n';
-            output += `    Type: ${ast.returnType}\\n`;
+            output += '  - Node: Return Node\n';
+            output += `    Type: ${ast.returnType}\n`;
         }
 
-        output += '\\n--- END BLUEPRINT ---';
+        output += '\n--- END BLUEPRINT ---';
 
         return output;
     }
@@ -131,28 +176,28 @@ document.addEventListener('DOMContentLoaded', (event) => {
         let blockOutput = "";
         block.forEach(statement => {
             if (statement.type === 'VariableDeclaration') {
-                blockOutput += `${indent}- Node: Set Variable (${statement.variableName})\\n`;
-                blockOutput += `${indent}  Type: ${statement.dataType}\\n`;
-                blockOutput += `${indent}  Value: ${statement.value}\\n`;
+                blockOutput += `${indent}- Node: Set Variable (${statement.variableName})\n`;
+                blockOutput += `${indent}  Type: ${statement.dataType}\n`;
+                blockOutput += `${indent}  Value: ${statement.value}\n`;
 
             } else if (statement.type === 'IfStatement') {
-                blockOutput += `${indent}- Node: Branch (if)\\n`;
-                blockOutput += `${indent}  Condition: ${statement.condition}\\n`;
-                blockOutput += `${indent}  ExecTrue: ->\\n`;
+                blockOutput += `${indent}- Node: Branch (if)\n`;
+                blockOutput += `${indent}  Condition: ${statement.condition}\n`;
+                blockOutput += `${indent}  ExecTrue: ->\n`;
                 blockOutput += convertBlockToBlueprint(statement.body, indent + "    ");
-                blockOutput += `${indent}  ExecFalse: ->\\n`;
+                blockOutput += `${indent}  ExecFalse: ->\n`;
             } else if (statement.type === 'ReturnStatement') {
-                blockOutput += `${indent}- Node: Return\\n`;
-                blockOutput += `${indent}  Value: ${statement.value}\\n`;
+                blockOutput += `${indent}- Node: Return\n`;
+                blockOutput += `${indent}  Value: ${statement.value}\n`;
             } else {
-                blockOutput += `${indent}- Node: Unknown\\n${indent}  Content: ${statement.value}\\n`;
+                blockOutput += `${indent}- Node: Unknown\n${indent}  Content: ${statement.value}\n`;
             }
-            blockOutput += '\\n';
+            blockOutput += '\n';
         });
         return blockOutput;
     }
 
     function displayBlueprint(blueprintText) {
-        blueprintOutputDiv.innerText = blueprintText.replace(/\\n/g, '\\n');
+        blueprintOutputDiv.innerText = blueprintText.replace(/\\n/g, '\n');
     }
 });
